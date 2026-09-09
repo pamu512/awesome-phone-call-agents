@@ -354,12 +354,26 @@ export async function runSelfCheck(): Promise<void> {
     throw new Error("compose after live validate failure must persist outcome_unknown");
   }
 
-  const { executeCallRun, resetIdempotencyForTests, LIVE_CONFIRM_PHRASE } = await import("./run-call");
+  process.env.CALL_CLAIMS_PATH = `/tmp/fraud-ops-claims-self-check-${process.pid}.json`;
+  const { executeCallRun, resetIdempotencyForTests, LIVE_CONFIRM_PHRASE, durableClaimKey } =
+    await import("./run-call");
+  if (
+    durableClaimKey(kycCase.case_id, kycCase.contact.phone_e164, "plan") !==
+    `${kycCase.case_id}|${kycCase.contact.phone_e164}|plan`
+  ) {
+    throw new Error("durable claim must be keyed by case+destination");
+  }
   resetIdempotencyForTests();
   const missing = await executeCallRun({ caseId: "nope", mode: "demo", fast: true, now });
   if (missing.status !== 404) throw new Error("unknown case must 404");
 
-  const calleKeys = ["CALLE_API_KEY", "CALLE_BASE_URL", "CALLE_LIVE_CALLS_ENABLED"] as const;
+  const calleKeys = [
+    "CALLE_API_KEY",
+    "CALLE_BASE_URL",
+    "CALLE_LIVE_CALLS_ENABLED",
+    "OPS_RUN_SECRET",
+    "LIVE_DIAL_ALLOWLIST",
+  ] as const;
   const calleSnap = Object.fromEntries(calleKeys.map((key) => [key, process.env[key]]));
   try {
     for (const key of calleKeys) delete process.env[key];
@@ -384,6 +398,45 @@ export async function runSelfCheck(): Promise<void> {
     });
     if (wrongPhrase.status !== 403) {
       throw new Error("live with flags on but wrong phrase must 403");
+    }
+
+    process.env.OPS_RUN_SECRET = "self-check-ops-secret";
+    const { signLiveGrant } = await import("./ops-auth");
+    const grant = signLiveGrant(kycCase.case_id, kycCase.contact.phone_e164);
+    const noGrant = await executeCallRun({
+      caseId: "case_demo_kyc_001",
+      mode: "live",
+      confirmLive: LIVE_CONFIRM_PHRASE,
+      fast: true,
+      now,
+    });
+    if (noGrant.status !== 403) {
+      throw new Error("live without destination grant must 403");
+    }
+    const wrongTo = await executeCallRun({
+      caseId: "case_demo_kyc_001",
+      mode: "live",
+      confirmLive: LIVE_CONFIRM_PHRASE,
+      liveGrant: grant.token,
+      to: "+15550101999",
+      fast: true,
+      now,
+    });
+    if (wrongTo.status !== 403) {
+      throw new Error("live with mismatched destination must 403");
+    }
+    const wrongGrantPhone = signLiveGrant(kycCase.case_id, "+15550101999");
+    const boundWrong = await executeCallRun({
+      caseId: "case_demo_kyc_001",
+      mode: "live",
+      confirmLive: LIVE_CONFIRM_PHRASE,
+      liveGrant: wrongGrantPhone.token,
+      to: kycCase.contact.phone_e164,
+      fast: true,
+      now,
+    });
+    if (boundWrong.status !== 403) {
+      throw new Error("grant bound to a different phone must 403");
     }
   } finally {
     for (const key of calleKeys) {
@@ -410,4 +463,94 @@ export async function runSelfCheck(): Promise<void> {
   if (!replay.ok || replay.body.outcome.call_id !== first.body.outcome.call_id) {
     throw new Error("replay must return same outcome");
   }
+  if (
+    first.body.outcome.transcript_snippet.includes("+15550101001") ||
+    /\+[1-9][0-9]{7,14}/.test(JSON.stringify(first.body.outcome))
+  ) {
+    throw new Error("browser outcome must not contain a raw E.164");
+  }
+
+  const { assertCalleBaseUrl, CALLE_PRODUCTION_ORIGIN } = await import("./calle-origin");
+  assertCalleBaseUrl(CALLE_PRODUCTION_ORIGIN);
+  for (const bad of [
+    "http://127.0.0.1:9",
+    "http://localhost:43127",
+    "https://evil.example",
+    "https://api.heycall-e.com/extra",
+    "https://user:pass@api.heycall-e.com",
+  ]) {
+    let rejected = false;
+    try {
+      assertCalleBaseUrl(bad);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) throw new Error(`CALLE_BASE_URL must reject ${bad}`);
+  }
+
+  const { authorizeOpsRequest, signLiveGrant, verifyLiveGrant, safeEqual } = await import("./ops-auth");
+  const { maskOutcomeForBrowser } = await import("./mask-public");
+  const priorSecret = process.env.OPS_RUN_SECRET;
+  delete process.env.OPS_RUN_SECRET;
+  const unconfigured = authorizeOpsRequest(new Request("http://127.0.0.1/api/calls/run"));
+  if (unconfigured.ok || unconfigured.status !== 503) {
+    throw new Error("missing OPS_RUN_SECRET must fail closed");
+  }
+  process.env.OPS_RUN_SECRET = "self-check-ops-secret";
+  const denied = authorizeOpsRequest(new Request("http://127.0.0.1/api/calls/run"));
+  if (denied.ok || denied.status !== 401) {
+    throw new Error("anonymous call run must 401");
+  }
+  const allowed = authorizeOpsRequest(
+    new Request("http://127.0.0.1/api/calls/run", {
+      headers: { authorization: "Bearer self-check-ops-secret" },
+    })
+  );
+  if (!allowed.ok) throw new Error("bearer OPS_RUN_SECRET must authorize");
+  if (!safeEqual("self-check-ops-secret", "self-check-ops-secret")) {
+    throw new Error("safeEqual true path");
+  }
+  const grant = signLiveGrant(kycCase.case_id, kycCase.contact.phone_e164);
+  if (!verifyLiveGrant(grant.token, kycCase.case_id, kycCase.contact.phone_e164)) {
+    throw new Error("live grant must verify against the approved phone");
+  }
+  if (verifyLiveGrant(grant.token, kycCase.case_id, "+15550101999")) {
+    throw new Error("live grant must not verify a different phone");
+  }
+  const leaked = maskOutcomeForBrowser({
+    ...first.body.outcome,
+    transcript_snippet: `Call ${kycCase.contact.phone_e164} please also try +15550101999`,
+    quotes: [`Reach me at ${kycCase.contact.phone_e164}`],
+  });
+  if (leaked.transcript_snippet.includes(kycCase.contact.phone_e164)) {
+    throw new Error("transcript mask leaked approved phone");
+  }
+  if (leaked.quotes.some((q) => q.includes(kycCase.contact.phone_e164))) {
+    throw new Error("quote mask leaked approved phone");
+  }
+
+  const { forceHaltForTests, dropClaimsMemoryForTests } = await import("./claims-store");
+  forceHaltForTests("case_demo_mer_001", "outcome_unknown");
+  dropClaimsMemoryForTests();
+  const halted = await executeCallRun({
+    caseId: "case_demo_mer_001",
+    mode: "demo",
+    fast: true,
+    now,
+  });
+  if (halted.status !== 409 || halted.body.error !== "halted for reconciliation") {
+    throw new Error("ambiguous halt must block later submissions after reload");
+  }
+
+  for (const fraudCase of MOCK_CASES) {
+    if (!/^\+1555010\d{4}$/.test(fraudCase.contact.phone_e164)) {
+      throw new Error(`${fraudCase.case_id} must use documentation 555-01xx`);
+    }
+    if (!/Example|Placeholder/.test(fraudCase.contact.name)) {
+      throw new Error(`${fraudCase.case_id} contact.name must be clearly fictional`);
+    }
+  }
+
+  if (priorSecret === undefined) delete process.env.OPS_RUN_SECRET;
+  else process.env.OPS_RUN_SECRET = priorSecret;
 }

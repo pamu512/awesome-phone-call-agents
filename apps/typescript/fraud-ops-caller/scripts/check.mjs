@@ -99,6 +99,12 @@ for (const item of cases) {
   if (!item.contact?.phone_e164?.startsWith("+")) {
     fail(`${item.case_id} phone is not E.164`);
   }
+  if (!/^\+1555010\d{4}$/.test(item.contact.phone_e164)) {
+    fail(`${item.case_id} must use NANP documentation +1-555-01xx`);
+  }
+  if (!/Example|Placeholder/.test(item.contact.name)) {
+    fail(`${item.case_id} contact.name must be clearly fictional`);
+  }
 }
 
 const ev = cases.filter((c) => c.intent === "evidence_collection");
