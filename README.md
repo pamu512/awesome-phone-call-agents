@@ -153,7 +153,7 @@ This project is an awesome list for AI-agent phone-call workflows. Add resources
 ### Apps
 
 - [Clarity](apps/typescript/clarity/) - Clarifies one ambiguous job-application claim through an adaptive CALL-E phone call, returning transcript-backed facts and unresolved questions, with a no-call replay default. [Demo video](https://www.youtube.com/watch?v=_eHWqBgilrI)
-- [Fraud Ops Caller](apps/typescript/fraud-ops-caller/) - Pack-fired fraud-ops desk (KYC, evidence, collections, merchant) with stub dial by default, masked plan destinations, and live CALL-E gated by operator secret, pinned origin, and confirm phrase.
+- [Fraud Ops Caller](apps/typescript/fraud-ops-caller/) - Pack-fired fraud-ops desk (KYC, evidence, collections, merchant) with stub dial by default, masked plan destinations, and live CALL-E gated by operator secret, pinned origin, and confirm phrase. [Demo video](https://www.youtube.com/watch?v=FHa4QgJPgj4)
 - [OneReach service follow-up](apps/typescript/onereach-service-followup/) - Turns an authorized CALL-E service appointment conversation into a validated Operations handoff, with a no-call default and standalone public integration example.
 
 - [Audition Agent](apps/python/audition-agent/) - Producer-reviewed CALL-E role-disclosure calls that collect performer interest, callback availability, and unanswered questions, with a no-call verification path.

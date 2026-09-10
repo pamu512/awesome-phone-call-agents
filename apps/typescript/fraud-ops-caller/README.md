@@ -4,6 +4,8 @@ Path: `apps/typescript/fraud-ops-caller`
 
 Hackathon desk for **CALL-E: Your Code Is Calling**. Voice is **execution on a pack-fired risk case** (KYC chase, evidence collection, collections, merchant outreach) -- not a recovery engine, consortium score, or chargeback CRM. A mock queue case is selected, a call plan is shown with a **masked** destination, a CALL-E stub dial runs by default, and a structured outcome writes back. Humans stay on the rails.
 
+[Demo video](https://www.youtube.com/watch?v=FHa4QgJPgj4)
+
 Product brief: [`BRIEF.md`](./BRIEF.md). MIT license.
 
 This app does **not** host propensity ML or a consortium score. An optional Tarka-shaped `tarka` object may ride on the case schema as **passthrough only** (no decide-time claim).
